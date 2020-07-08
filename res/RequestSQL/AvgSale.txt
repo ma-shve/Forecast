@@ -1,0 +1,139 @@
+DECLARE @StartDate DATETIME = DATETIME2FROMPARTS({},00,00,00,00,00)
+DECLARE @EndDate DATETIME = DATETIME2FROMPARTS({},00,00,00,00,00)
+
+SELECT
+	Клиенты.Period,
+	Клиенты.Артикул,
+	Клиенты.Склад,
+	ISNULL(CASE
+		WHEN Клиенты.УникКлиенты = 0
+			THEN 0
+		ELSE Продано.Продано/Клиенты.УникКлиенты
+	END,0) as СреднийОтпуск	
+FROM
+(SELECT
+ClientQty.Period,
+ClientQty.Art as Артикул,
+ClientQty.Whouse as Склад,
+SUM(ClientQty.Qnty) as УникКлиенты
+FROM
+(
+SELECT
+	T3._Fld3394 as Art,
+	CASE
+		WHEN T6._Description = 'Краснодар' or T6._Description = 'Краснодар (Логистик-Юг)' or T6._Description = 'Краснодар (ООО "Бизнес Путь Групп")'
+			THEN 'Краснодар'
+		ELSE
+			CASE
+				WHEN T6._Description = 'Питер НОВЫЙ' or T6._Description = 'Питер ОФИС'  
+					THEN 'Питер' 
+				ELSE T6._Description
+			END
+	END	as Whouse, 
+	DATEFROMPARTS(DATEPART ( yy , T4._Date_Time ) - 2000,DATEPART ( mm , T4._Date_Time ), DATEPART ( dd , T4._Date_Time  )) as Period,
+	CAST(COUNT(DISTINCT T5._Description) AS INT) as Qnty
+FROM 
+	dbo._Document369_VT11487 T2
+		LEFT OUTER JOIN dbo._Reference142 T3
+			ON (T2._Fld11489RRef = T3._IDRRef) AND (T3._Fld725 = 0.0)
+		LEFT OUTER JOIN dbo._Document369 T4
+			ON (T2._Document369_IDRRef = T4._IDRRef) AND (T4._Fld725 = 0.0)
+		LEFT OUTER JOIN dbo._Reference161 T5
+			ON (T4._Fld11439RRef = T5._IDRRef) AND (T5._Fld725 = 0.0)
+		LEFT OUTER JOIN dbo._Reference223 T6
+			ON (T4._Fld11444RRef = T6._IDRRef) AND (T6._Fld725 = 0.0)
+WHERE 
+	(T2._Fld725 = 0.0)
+	AND (T4._Posted = 0x01)
+	AND (DATEADD (YYYY , -2000 , T4._Date_Time ) >= @StartDate
+		AND DATEADD (YYYY , -2000 , T4._Date_Time ) <= @EndDate)
+	AND T6._Description in ('Алтуфьево', 'Ботаково', 'Краснодар', 'Краснодар (Логистик-Юг)', 'Краснодар (ООО "Бизнес Путь Групп")', 
+		'Москва Фирм.Стиль', 'Новосибирск', 'Питер НОВЫЙ', 'Питер ОФИС', 'Центральный')
+	/*AND T3._Fld3394 = '3891'*/
+GROUP BY 
+	T3._Fld3394,
+	T6._Description,
+	DATEFROMPARTS(DATEPART ( yy , T4._Date_Time ) - 2000,DATEPART ( mm , T4._Date_Time ), DATEPART ( dd , T4._Date_Time  ))) as ClientQty
+GROUP BY
+	ClientQty.Period,
+	ClientQty.Art,
+	ClientQty.Whouse) as Клиенты
+
+LEFT JOIN
+
+(SELECT
+	Sell.Art as Артикул,
+	Sell.Period,
+	SUM(Sell.Qnty) as Продано,
+	CASE
+		WHEN Sell.WH = 'Краснодар' or Sell.WH = 'Краснодар (Логистик-Юг)' or Sell.WH = 'Краснодар (ООО "Бизнес Путь Групп")'
+			THEN 'Краснодар'
+		ELSE
+			CASE
+				WHEN Sell.WH = 'Питер НОВЫЙ' or Sell.WH = 'Питер ОФИС'  
+					THEN 'Питер' 
+				ELSE Sell.WH
+			END
+	END	as Склад
+FROM
+(SELECT	
+	T3._Fld3394 as Art,	
+	DATEFROMPARTS(DATEPART ( yy , T1._Period ) - 2000,DATEPART ( mm , T1._Period ), DATEPART ( dd , T1._Period  )) as Period,	
+	CASE 		
+		WHEN T1._Fld15445_TYPE = 0x08 			
+			AND T1._Fld15445_RTRef = 0x000000F1 THEN T4._Description WHEN T1._Fld15445_TYPE = 0x08 			
+			AND T1._Fld15445_RTRef = 0x000000A1 THEN T5._Description WHEN T1._Fld15445_TYPE = 0x08 			
+			AND T1._Fld15445_RTRef = 0x000000DF THEN T6._Description ELSE CAST(NULL AS NVARCHAR(100)) 	
+	END as WH,	
+	CAST(SUM(T1._Fld15450) AS INT) as Qnty
+FROM 	
+	dbo._AccumRg15437 T1	
+	LEFT OUTER JOIN dbo._Reference120 T2		
+		ON (T1._Fld15438RRef = T2._IDRRef) AND (T2._Fld725 = 0.0)	
+	LEFT OUTER JOIN dbo._Reference142 T3		
+		ON (T2._Fld3030RRef = T3._IDRRef) AND (T3._Fld725 = 0.0)	
+	LEFT OUTER JOIN dbo._Reference241 T4		
+		ON (T1._Fld15445_TYPE = 0x08 AND T1._Fld15445_RTRef = 0x000000F1 AND T1._Fld15445_RRRef = T4._IDRRef) AND (T4._Fld725 = 0.0)	
+	LEFT OUTER JOIN dbo._Reference161 T5		
+		ON (T1._Fld15445_TYPE = 0x08 AND T1._Fld15445_RTRef = 0x000000A1 AND T1._Fld15445_RRRef = T5._IDRRef) AND (T5._Fld725 = 0.0)	
+	LEFT OUTER JOIN dbo._Reference223 T6		
+		ON (T1._Fld15445_TYPE = 0x08 AND T1._Fld15445_RTRef = 0x000000DF AND T1._Fld15445_RRRef = T6._IDRRef) AND (T6._Fld725 = 0.0)
+WHERE 	
+	T1._Fld725 = 0.0	
+	/*AND T3._Fld3394 = '3891'	*/
+	AND (DATEADD (YYYY , -2000 , T1._Period ) >= @StartDate	
+	AND DATEADD (YYYY , -2000 , T1._Period ) <= @EndDate)	
+	AND 
+	CASE		
+		WHEN T1._Fld15445_TYPE = 0x08 			
+			AND T1._Fld15445_RTRef = 0x000000F1 THEN T4._Description WHEN T1._Fld15445_TYPE = 0x08 			
+			AND T1._Fld15445_RTRef = 0x000000A1 THEN T5._Description WHEN T1._Fld15445_TYPE = 0x08 			
+			AND T1._Fld15445_RTRef = 0x000000DF THEN T6._Description ELSE CAST(NULL AS NVARCHAR(100)) END IS NOT NULL
+GROUP BY 	
+	T3._Fld3394,	
+	T1._Period,	
+	CASE 		
+		WHEN T1._Fld15445_TYPE = 0x08 			
+		AND T1._Fld15445_RTRef = 0x000000F1 THEN T4._Description WHEN T1._Fld15445_TYPE = 0x08 			
+		AND T1._Fld15445_RTRef = 0x000000A1 THEN T5._Description WHEN T1._Fld15445_TYPE = 0x08 			
+		AND T1._Fld15445_RTRef = 0x000000DF THEN T6._Description ELSE CAST(NULL AS NVARCHAR(100)) 
+	END) as Sell
+
+GROUP BY
+
+	Sell.Art ,
+	Sell.Period,
+	CASE
+		WHEN Sell.WH = 'Краснодар' or Sell.WH = 'Краснодар (Логистик-Юг)' or Sell.WH = 'Краснодар (ООО "Бизнес Путь Групп")'
+			THEN 'Краснодар'
+		ELSE
+			CASE
+				WHEN Sell.WH = 'Питер НОВЫЙ' or Sell.WH = 'Питер ОФИС'  
+					THEN 'Питер' 
+				ELSE Sell.WH
+			END
+	END) as Продано
+
+ON Клиенты.Артикул = Продано.Артикул
+	AND Клиенты.Period = Продано.Period
+	AND Клиенты.Склад = Продано.Склад

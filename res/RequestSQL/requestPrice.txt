@@ -1,0 +1,33 @@
+SELECT
+DATETIME2FROMPARTS( CAST( YEAR(T1._Period) - 2000 as INT ), CAST( MONTH(T1._Period) as INT ), CAST( DAY(T1._Period) as INT ),00,00,00,00,00 ) as Period,
+
+T2._Fld3394 as Art,
+
+T1._Fld15400 as Цена
+
+FROM 
+dbo._InfoRg15396 T1
+
+LEFT OUTER JOIN dbo._Reference142 T2
+
+ON (T1._Fld15397RRef = T2._IDRRef) AND (T2._Fld725 = 0.0)
+
+LEFT OUTER JOIN dbo._Reference58 T3
+
+ON (T2._Fld3400RRef = T3._IDRRef) AND (T3._Fld725 = 0.0)
+
+LEFT OUTER JOIN dbo._Reference66 T4
+
+ON (T1._Fld15398RRef = T4._IDRRef) AND (T4._Fld725 = 0.0)
+
+WHERE 
+((T1._Fld725 = 0.0)) 
+AND ((T3._Description IN ('Инвентарь', 'Оборудование')) 
+AND (T4._Description = 'Розничная'))
+
+AND DATETIME2FROMPARTS(CAST(YEAR(T1._Period) - 2000 as INT),CAST(MONTH(T1._Period) as INT), CAST(DAY(T1._Period) as INT),00,00,00,00,00 ) >= DATETIME2FROMPARTS({},00,00,00,00,00 )
+
+AND DATETIME2FROMPARTS(CAST(YEAR(T1._Period) - 2000 as INT), CAST(MONTH(T1._Period) as INT), CAST(DAY(T1._Period) as INT),00,00,00,00,00 ) <= DATETIME2FROMPARTS({},00,00,00,00,00 )	
+
+ORDER BY 
+T1._Period

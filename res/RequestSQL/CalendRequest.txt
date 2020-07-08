@@ -1,0 +1,12 @@
+DECLARE @StartDate DATETIME = DATETIME2FROMPARTS({},00,00,00,00,00)/*(2018,01,01)*/
+DECLARE @EndTime DATETIME = DATETIME2FROMPARTS({},00,00,00,00,00)/*(2018,05,31)*/
+
+SELECT * 
+/*INTO #tcalen*/
+FROM   (SELECT @StartDate + RN - 1  AS Period 
+        FROM   (SELECT ROW_NUMBER() 
+                         OVER ( 
+                           ORDER BY (SELECT NULL)) RN 
+                FROM   master..[spt_values]) T) T1
+		 
+WHERE  T1.Period <= @EndTime

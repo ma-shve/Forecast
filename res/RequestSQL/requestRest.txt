@@ -1,0 +1,145 @@
+DECLARE @StartDate DATETIME = DATETIME2FROMPARTS(2017,12,31,00,00,00,00,00) /* @StartDateNew - 1 */
+DECLARE @StartDateNew DATETIME = DATETIME2FROMPARTS(2018,01,01,00,00,00,00,00)/*(2018,01,01)*/
+DECLARE @EndTime DATETIME = DATETIME2FROMPARTS(2020,01,24,00,00,00,00,00)/*(2018,05,31)*/
+DECLARE @Qnty INT = 0
+/***************************************************************************Артикул выборки****************************************************************************************************/
+DECLARE @Art NVARCHAR(25) = {art}
+DECLARE @Whouse NVARCHAR(25) = {whouse}
+/***********************************************************************************************************************************************************************************************/
+DROP TABLE #tt1, #tt2, #tcalen, #tQnty, #tRest1, #tRest
+/****************************************************************************Начальное количество************************************************************************************************/
+SET @Qnty = (
+SELECT 
+	CAST(SUM(T1.Fld16878Balance_) AS INT) as Qnty
+FROM (SELECT
+	T2._Period AS _Period,
+	T2._Fld16873RRef AS Fld16873RRef,
+	T2._Fld16875RRef AS Fld16875RRef,
+	CAST(SUM(T2._Fld16878) AS NUMERIC(32, 8)) AS Fld16878Balance_
+FROM 
+	dbo._AccumRgT16881 T2
+WHERE 
+	(T2._Fld725 = 0.0)
+	AND DATEFROMPARTS(DATEPART ( yy , T2._Period ) - 2000, DATEPART ( mm , T2._Period ), DATEPART ( dd , T2._Period  )) = @StartDateNew
+	AND (T2._Fld16878 <> 0.0) 
+	AND (T2._Fld16878 <> 0.0)
+GROUP BY T2._Fld16873RRef,
+T2._Fld16875RRef,
+T2._Period
+HAVING (CAST(SUM(T2._Fld16878) AS NUMERIC(32, 8))) <> 0.0) T1
+LEFT OUTER JOIN dbo._Reference142 T3
+ON (T1.Fld16873RRef = T3._IDRRef) AND (T3._Fld725 = 0.0)
+LEFT OUTER JOIN dbo._Reference223 T4
+ON (T1.Fld16875RRef = T4._IDRRef) AND (T4._Fld725 = 0.0)
+WHERE 
+	T3._Fld3394 = @Art
+	AND (T4._Description = @Whouse)
+GROUP BY 
+	CONVERT(varchar(10),DATEFROMPARTS(DATEPART ( yy , T1._Period ) - 2000,DATEPART ( mm , T1._Period ), DATEPART ( dd , T1._Period  )),104),
+	T3._Fld3394
+	)
+/***********************************************************************Движение по выбранным складам****************************************************************************************************/
+SELECT
+	DATEFROMPARTS(DATEPART ( yy , T1._Period ) - 2000,DATEPART ( mm , T1._Period ), DATEPART ( dd , T1._Period  )) as Period,
+	T2._Fld3394 as Art,
+	T1._RecordKind,
+	CASE	
+		WHEN T1._RecordKind = 1
+			THEN CAST(SUM(T1._Fld16878) AS INT) * (-1)
+		ELSE CAST(SUM(T1._Fld16878) AS INT)
+	END as Количество 
+INTO #tt2
+FROM dbo._AccumRg16872 T1
+LEFT OUTER JOIN dbo._Reference142 T2
+ON (T1._Fld16873RRef = T2._IDRRef) AND (T2._Fld725 = 0.0)
+LEFT OUTER JOIN dbo._Reference223 T3
+ON (T1._Fld16875RRef = T3._IDRRef) AND (T3._Fld725 = 0.0)
+WHERE 
+	(T1._Fld725 = 0.0)
+	AND T3._Description = @Whouse
+	AND (T2._Fld3394 = @Art)
+	AND (DATEFROMPARTS(DATEPART ( yy , T1._Period ) - 2000,DATEPART ( mm , T1._Period ), DATEPART ( dd , T1._Period  )) >= @StartDateNew
+	AND DATEFROMPARTS(DATEPART ( yy , T1._Period ) - 2000,DATEPART ( mm , T1._Period ), DATEPART ( dd , T1._Period  ))  <= @EndTime)
+GROUP BY 
+	T1._Period,
+	T2._Fld3394,
+	T1._RecordKind
+ORDER BY 
+	T1._Period
+/***********************************************************************Агрегирование внутри дня****************************************************************************************************/	
+SELECT 
+	#tt2.Period,
+	#tt2.Art,
+	SUM(#tt2.Количество) as  Количество
+INTO #tt1
+FROM #tt2
+GROUP BY 
+	#tt2.Period,
+	#tt2.Art
+ORDER BY 
+	#tt2.Period
+/*******************************************************************************Календарь****************************************************************************************************/	
+SELECT * 
+INTO #tcalen
+FROM   (SELECT @StartDate + RN  AS Period 
+        FROM   (SELECT ROW_NUMBER() 
+                         OVER ( 
+                           ORDER BY (SELECT NULL)) RN 
+                FROM   master..[spt_values]) T) T1
+		 
+WHERE  T1.Period <= @EndTime 
+/***********************************************************************Таблица движения остатков без начального значения**********************************************************************/
+SELECT
+	Period,
+	Art,
+	SUM(Количество) as Qnty
+INTO #tQnty
+FROM #tt1
+GROUP BY
+	Period,
+	Art
+ORDER BY
+	Period
+/***********************************************************************Таблица движения остатков с начальным значением*************************************************************************/
+SELECT
+	#tcalen.Period,
+	@StartDateNew as StartDateNew,
+	CASE DATEDIFF(DAY,0, #tcalen.Period) % 7
+		WHEN 0 THEN 'mon'
+		WHEN 1 THEN 'tue'
+		WHEN 2 THEN 'wen'
+		WHEN 3 THEN 'thur'
+		WHEN 4 THEN 'frid'
+		WHEN 5 THEN 'sat'
+		WHEN 6 THEN 'sun'
+	END as Dw,
+	ISNULL(#tQnty.Art, @Art) as Art,
+	CASE
+		WHEN #tcalen.Period = @StartDateNew
+			THEN @Qnty
+		ELSE ISNULL(#tQnty.Qnty,0)
+	END as Qnty
+INTO #tRest1
+FROM #tcalen FULL JOIN #tQnty
+	ON #tcalen.Period = #tQnty.Period
+WHERE
+	#tcalen.Period IS NOT NULL
+/******************************************************************Нарастающий итог*************************************************************************************************************/
+SELECT 	
+	#tRest1.Period,
+	#tRest1.Dw,
+	#tRest1.Art,	
+    coalesce(sum(#tRest1.Qnty) over (order by #tRest1.Period 
+                rows between unbounded preceding and current row), 
+                0) as totalQnty
+INTO #tRest
+from #tRest1
+order by #tRest1.Period
+
+/******************************************************************Убираем все воскресные дни***************************************************************************************************/
+SELECT 	
+	*
+from #tRest
+WHERE
+	DATEDIFF(DAY,0, #tRest.Period)%7 <> 6	
+order by #tRest.Period

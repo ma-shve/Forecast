@@ -1,0 +1,318 @@
+DECLARE @PastDay INT = 730 
+DECLARE @StartDate DATETIME = DATEFROMPARTS(DATEPART ( yy , Getdate() - @PastDay ) ,DATEPART ( mm , Getdate() - @PastDay ), DATEPART ( dd , Getdate() - @PastDay  )) 
+DECLARE @StartDateNew DATETIME = DATEFROMPARTS(  YEAR(Getdate() - @PastDay),  MONTH(Getdate() - @PastDay) ,  01  ) 
+DECLARE @EndTime DATETIME = DATEFROMPARTS(DATEPART ( yy , Getdate() ) ,DATEPART ( mm , Getdate() ), DATEPART ( dd , Getdate() ))
+DECLARE @DecPer INT = 30
+DECLARE @Qnty INT = 0
+
+/***************************************************************************Выборки****************************************************************************************************/
+
+DECLARE @Art NVARCHAR(25) = {}
+DECLARE @Whouse NVARCHAR(100) = {}
+
+/****************************************************************************Начальное количество************************************************************************************************/
+
+SET @Qnty = (
+SELECT 
+	CAST(SUM(T1.Fld16878Balance_) AS INT) as Qnty
+FROM (SELECT
+	T2._Period AS _Period,
+	T2._Fld16873RRef AS Fld16873RRef,
+	T2._Fld16875RRef AS Fld16875RRef,
+	CAST(SUM(T2._Fld16878) AS NUMERIC(32, 8)) AS Fld16878Balance_
+FROM 
+	dbo._AccumRgT16881 T2
+WHERE 
+	((T2._Fld725 = 0.0))
+	AND (CONVERT(varchar(10),DATEFROMPARTS(DATEPART ( yy , T2._Period ) - 2000, DATEPART ( mm , T2._Period ), DATEPART ( dd , T2._Period  )),104) = 
+			DATEFROMPARTS(  YEAR(Getdate() - @PastDay),  MONTH(Getdate() - @PastDay) ,  01  ))
+	AND (T2._Fld16878 <> 0.0) 
+	AND (T2._Fld16878 <> 0.0)
+GROUP BY T2._Fld16873RRef,
+T2._Fld16875RRef,
+T2._Period
+HAVING (CAST(SUM(T2._Fld16878) AS NUMERIC(32, 8))) <> 0.0) T1
+LEFT OUTER JOIN dbo._Reference142 T3
+ON (T1.Fld16873RRef = T3._IDRRef) AND (T3._Fld725 = 0.0)
+LEFT OUTER JOIN dbo._Reference223 T4
+ON (T1.Fld16875RRef = T4._IDRRef) AND (T4._Fld725 = 0.0)
+WHERE 
+	T3._Fld3394 = @Art
+	AND (T4._Description = @Whouse)
+GROUP BY 
+	CONVERT(varchar(10),DATEFROMPARTS(DATEPART ( yy , T1._Period ) - 2000,DATEPART ( mm , T1._Period ), DATEPART ( dd , T1._Period  )),104),
+	T3._Fld3394)
+
+/***********************************************************************Движение по выбранным складам****************************************************************************************************/
+
+SELECT
+	DATEFROMPARTS(DATEPART ( yy , T1._Period ) - 2000,DATEPART ( mm , T1._Period ), DATEPART ( dd , T1._Period  )) as Period,
+	T2._Fld3394 as Art,
+	/*T1._RecordKind,*/
+	CASE	
+		WHEN T1._RecordKind = 1
+			THEN CAST(SUM(T1._Fld16878) AS INT) * (-1)
+		ELSE CAST(SUM(T1._Fld16878) AS INT)
+	END as Количество 
+INTO #tt1
+FROM dbo._AccumRg16872 T1
+LEFT OUTER JOIN dbo._Reference142 T2
+ON (T1._Fld16873RRef = T2._IDRRef) AND (T2._Fld725 = 0.0)
+LEFT OUTER JOIN dbo._Reference223 T3
+ON (T1._Fld16875RRef = T3._IDRRef) AND (T3._Fld725 = 0.0)
+WHERE 
+	(T1._Fld725 = 0.0)
+	AND T3._Description = @Whouse
+	AND (T2._Fld3394 = @Art)
+	AND (DATEADD (YYYY , -2000 , T1._Period ) >= @StartDateNew-1) 
+	AND (DATEADD (YYYY , -2000 , T1._Period ) <= getdate()+1)
+GROUP BY 
+	T1._Period,
+	T2._Fld3394,
+	T1._RecordKind
+ORDER BY 
+	T1._Period
+
+/***********************************************************************Календарь****************************************************************************************************/	
+
+SELECT * 
+INTO #tcalen
+FROM   (SELECT @StartDateNew-1 + RN  AS Period 
+        FROM   (SELECT ROW_NUMBER() 
+                         OVER ( 
+                           ORDER BY (SELECT NULL)) RN 
+                FROM   master..[spt_values]) T) T1 
+WHERE  T1.Period <= @EndTime 
+
+SELECT
+	Period,
+	Art,
+	SUM(Количество) as Qnty
+INTO #tQnty
+FROM #tt1
+GROUP BY
+	Period,
+	Art
+ORDER BY
+	Period
+
+/***********************************************************************Таблица движения остатков с начальным значением******************************************************************************/
+
+SELECT
+	#tcalen.Period,
+	CASE DATEDIFF(DAY,0, #tcalen.Period)%7
+		WHEN 0 THEN 'mon'
+		WHEN 1 THEN 'tue'
+		WHEN 2 THEN 'wen'
+		WHEN 3 THEN 'thur'
+		WHEN 4 THEN 'frid'
+		WHEN 5 THEN 'sat'
+		WHEN 6 THEN 'sun'
+	END as Dw,
+	ISNULL(#tQnty.Art, @Art) as Art,
+	CASE
+		WHEN #tcalen.Period = @StartDateNew
+			THEN @Qnty
+		ELSE ISNULL(#tQnty.Qnty,0)
+	END as Qnty
+INTO #tRest2
+FROM #tcalen FULL JOIN #tQnty
+	ON #tcalen.Period = #tQnty.Period
+WHERE
+	#tcalen.Period IS NOT NULL
+
+/******************************************************************Убираем все воскресные дни***************************************************************************************************/
+SELECT 	
+	*
+INTO #tRest1
+from #tRest2
+WHERE
+	DATEDIFF(DAY,0, #tRest2.Period)%7 <> 6	
+order by #tRest2.Period
+
+/******************************************************************Нарастающий итог_Остатки*************************************************************************************************/
+
+SELECT 	
+	#tRest1.Period,
+	#tRest1.Dw,
+	#tRest1.Art,	
+    coalesce(sum(#tRest1.Qnty) over (order by #tRest1.Period 
+                rows between unbounded preceding and current row), 
+                0) as totalQnty
+INTO #tRest
+from #tRest1
+order by #tRest1.Period
+
+/******************************************************************Продажи по дням без воскресений*************************************************************************************************/
+
+SELECT
+	calen.Date1,
+	CASE DATEDIFF(DAY,0, calen.Date1)%7
+		WHEN 0 THEN 'mon'
+		WHEN 1 THEN 'tue'
+		WHEN 2 THEN 'wen'
+		WHEN 3 THEN 'thur'
+		WHEN 4 THEN 'frid'
+		WHEN 5 THEN 'sat'
+		WHEN 6 THEN 'sun'
+	END as Dw,
+	ISNULL(sells.Артикул, @Art) as Art,
+	SUM(ISNULL(sells.Количество,0)) as Qnty
+INTO #tSales
+FROM
+(
+SELECT * 
+FROM   (SELECT @StartDate + RN  AS Date1 
+        FROM   (SELECT ROW_NUMBER() 
+                         OVER ( 
+                           ORDER BY (SELECT NULL)) RN 
+                FROM   master..[spt_values]) T) T1 
+WHERE  T1.Date1 <= @EndTime 
+
+) as calen
+
+FULL JOIN
+
+(SELECT
+T4._Fld3394 as Артикул,
+CAST(SUM(T2._Fld15450) AS int) as Количество,
+DATEFROMPARTS(DATEPART ( yy , T2._Period ) - 2000,DATEPART ( mm , T2._Period ), DATEPART ( dd , T2._Period  )) as Date1
+
+FROM dbo._AccumRg15437 T2
+LEFT OUTER JOIN dbo._Reference120 T3
+ON (T2._Fld15438RRef = T3._IDRRef) AND (T3._Fld725 = 0.0)
+LEFT OUTER JOIN dbo._Reference142 T4
+ON (T3._Fld3030RRef = T4._IDRRef) AND (T4._Fld725 = 0.0)
+LEFT OUTER JOIN dbo._Enum708 T5
+ON T2._Fld15448RRef = T5._IDRRef
+LEFT OUTER JOIN dbo._Reference241 T6
+ON (T2._Fld15445_TYPE = 0x08 AND T2._Fld15445_RTRef = 0x000000F1 AND T2._Fld15445_RRRef = T6._IDRRef) AND (T6._Fld725 = 0.0)
+LEFT OUTER JOIN dbo._Reference161 T7
+ON (T2._Fld15445_TYPE = 0x08 AND T2._Fld15445_RTRef = 0x000000A1 AND T2._Fld15445_RRRef = T7._IDRRef) AND (T7._Fld725 = 0.0)
+LEFT OUTER JOIN dbo._Reference223 T8
+ON (T2._Fld15445_TYPE = 0x08 AND T2._Fld15445_RTRef = 0x000000DF AND T2._Fld15445_RRRef = T8._IDRRef) AND (T8._Fld725 = 0.0)
+WHERE 
+	T4._Fld3394 = @Art
+	and ((T2._Fld725 = 0.0)) 
+	AND ((T5._EnumOrder <> 170) 
+		AND ((CASE WHEN T2._Fld15445_TYPE = 0x08 
+			AND T2._Fld15445_RTRef = 0x000000F1 THEN T6._Description WHEN T2._Fld15445_TYPE = 0x08 
+			AND T2._Fld15445_RTRef = 0x000000A1 THEN T7._Description WHEN T2._Fld15445_TYPE = 0x08 
+			AND T2._Fld15445_RTRef = 0x000000DF THEN T8._Description ELSE CAST(NULL AS NVARCHAR(100)) END = @Whouse)) 
+				AND (DATEADD (YYYY , -2000 , T2._Period ) >= Getdate() - @PastDay) 
+				AND (DATEADD (YYYY , -2000 , T2._Period ) <= getdate()+1))
+GROUP BY 
+	T4._Fld3394,
+	DATEFROMPARTS(DATEPART ( yy , T2._Period ) - 2000,DATEPART ( mm , T2._Period ), DATEPART ( dd , T2._Period  ))  
+) as sells
+
+on calen.Date1 = sells.Date1
+
+WHERE
+	calen.Date1 IS NOT NULL
+	AND DATEDIFF(DAY,0, calen.Date1)%7 <> 6
+GROUP BY 
+	calen.Date1,
+	CASE DATEDIFF(DAY,0, calen.Date1)%7
+		WHEN 0 THEN 'mon'
+		WHEN 1 THEN 'tue'
+		WHEN 2 THEN 'wen'
+		WHEN 3 THEN 'thur'
+		WHEN 4 THEN 'frid'
+		WHEN 5 THEN 'sat'
+		WHEN 6 THEN 'sun'
+	END,
+	ISNULL(sells.Артикул, @Art)
+ORDER BY
+	calen.Date1
+
+/******************************************************************Количество уникальных партнеров по дням без воскресений*************************************************************************************************/
+
+
+SELECT
+	calen.Date1,
+	CASE DATEDIFF(DAY,0, calen.Date1)%7
+		WHEN 0 THEN 'mon'
+		WHEN 1 THEN 'tue'
+		WHEN 2 THEN 'wen'
+		WHEN 3 THEN 'thur'
+		WHEN 4 THEN 'frid'
+		WHEN 5 THEN 'sat'
+		WHEN 6 THEN 'sun'
+	END as Dw,
+	ISNULL(cust.Артикул, @Art) as Art,
+	SUM(ISNULL(cust.Количество,0)) as Qnty
+INTO #tCustomers
+FROM
+(
+SELECT * 
+FROM   (SELECT @StartDate + RN  AS Date1 
+        FROM   (SELECT ROW_NUMBER() 
+                         OVER ( 
+                           ORDER BY (SELECT NULL)) RN 
+                FROM   master..[spt_values]) T) T1 
+WHERE  T1.Date1 <= @EndTime 
+
+) as calen
+
+FULL JOIN
+
+(SELECT
+T3._Fld3394 as Артикул,
+T3._Description,
+DATEFROMPARTS(DATEPART ( yy , T4._Date_Time ) - 2000,DATEPART ( mm , T4._Date_Time ), DATEPART ( dd , T4._Date_Time  )) as Date1,
+CAST(COUNT(DISTINCT T5._Description) AS NUMERIC(10)) as Количество
+FROM dbo._Document369_VT11487 T2
+LEFT OUTER JOIN dbo._Reference142 T3
+ON (T2._Fld11489RRef = T3._IDRRef) AND (T3._Fld725 = 0.0)
+LEFT OUTER JOIN dbo._Document369 T4
+ON (T2._Document369_IDRRef = T4._IDRRef) AND (T4._Fld725 = 0.0)
+LEFT OUTER JOIN dbo._Reference161 T5
+ON (T4._Fld11439RRef = T5._IDRRef) AND (T5._Fld725 = 0.0)
+LEFT OUTER JOIN dbo._Reference223 T6
+ON (T4._Fld11444RRef = T6._IDRRef) AND (T6._Fld725 = 0.0)
+WHERE 
+	(T2._Fld725 = 0.0)
+	AND (T4._Posted = 0x01 
+		AND (T3._Fld3394 = @Art) 
+	AND ((T6._Description = @Whouse)))
+	AND ((DATEADD (YYYY , -2000 , T4._Date_Time ) >= Getdate() - @PastDay) 
+		AND (DATEADD (YYYY , -2000 , T4._Date_Time ) <= getdate()+1))
+GROUP BY T3._Fld3394,
+	T3._Description,
+	DATEFROMPARTS(DATEPART(yy , T4._Date_Time) - 2000,DATEPART (mm , T4._Date_Time), DATEPART (dd , T4._Date_Time) )
+) as cust
+
+on calen.Date1 = cust.Date1
+WHERE
+	DATEDIFF(DAY,0, calen.Date1)%7 <> 6
+GROUP BY 
+	calen.Date1,
+	CASE DATEDIFF(DAY,0, calen.Date1)%7
+		WHEN 0 THEN 'mon'
+		WHEN 1 THEN 'tue'
+		WHEN 2 THEN 'wen'
+		WHEN 3 THEN 'thur'
+		WHEN 4 THEN 'frid'
+		WHEN 5 THEN 'sat'
+		WHEN 6 THEN 'sun'
+	END,
+	ISNULL(cust.Артикул, @Art)
+
+ORDER BY
+	calen.Date1
+
+/************************************************************************************************************************************************************************************************************/
+
+SELECT
+	#tRest.Period,
+	#tRest.Dw,
+	#tRest.totalQnty as RestQnty,
+	#tSales.Qnty as SalesQnty,
+	#tCustomers.Qnty as CustomersQnty
+FROM #tRest LEFT JOIN  #tSales on #tRest.Period = #tSales.Date1
+	  LEFT JOIN #tCustomers on #tRest.Period = #tCustomers.Date1
+WHERE
+	#tSales.Date1 IS NOT NULL
+ORDER BY
+    #tRest.Period

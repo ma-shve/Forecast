@@ -1,0 +1,16 @@
+SELECT DISTINCT
+T1._Fld3394 as Артикул
+FROM dbo._Reference142 T1
+LEFT OUTER JOIN dbo._Reference142_VT3439 T2
+ON ((T1._IDRRef = T2._Reference142_IDRRef) AND (T2._Fld3441RRef = 0x93F1002590F36D2311E41691CA484F7F)) AND T2._Fld725 = T1._Fld725
+LEFT OUTER JOIN dbo._Reference142_VT3439 T3
+ON ((T1._IDRRef = T3._Reference142_IDRRef) AND (T3._Fld3441RRef = 0x93F1002590F36D2311E41691D41DEF83)) AND T3._Fld725 = T1._Fld725
+LEFT OUTER JOIN dbo._Reference142 T4
+ON (T1._ParentIDRRef = T4._IDRRef) AND (T4._Fld725 = 0.0)
+LEFT OUTER JOIN dbo._Reference142 T5
+ON (T4._ParentIDRRef = T5._IDRRef) AND (T5._Fld725 = 0.0)
+LEFT OUTER JOIN dbo._Reference58 T6
+ON (T1._Fld3400RRef = T6._IDRRef) AND (T6._Fld725 = 0.0)
+WHERE 
+	T6._Description = 'Инвентарь' 
+	OR T6._Description = 'Оборудование'
